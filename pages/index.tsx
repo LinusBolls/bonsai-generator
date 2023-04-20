@@ -1,8 +1,6 @@
-
-
 import { getDistanceToBezierCurve } from "@/src/feature/treeGen/getDistanceToBezierCurve";
 import { getDistanceToCatmullRomSpline } from "@/src/feature/treeGen/getDistanceToCatmullRomSpline";
-import { getDistanceToChaikinsCurve } from "@/src/feature/treeGen/getDistanceToChaikinsCurve";
+import { getChaikinsCurve, getDistanceToChaikinsCurve } from "@/src/feature/treeGen/getDistanceToChaikinsCurve";
 import { useEffect, useRef, useState } from "react"
 
 import randomSeed from "random-seed"
@@ -23,7 +21,7 @@ const CurveGenerationAlgorithm = {
 }
 
 interface TreeSegment {
-  nodes: TreeNode[]
+  nodes: TreeSegment[]
 }
 
 const MAX_SIDE_BRANCHES = 3
@@ -38,14 +36,14 @@ const getRandomInt = (min: number, max: number): number => {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-const getNodeAngle = (node1: TreeNode | null, node2: TreeNode | null) => {
+const getNodeAngle = (node1: TreeSegment | null, node2: TreeSegment | null) => {
 
   if (!node1 || !node2) return 0
 
   return getAngle(node1.pos, node2.pos)
 }
 
-const getMainBranchProb = (node: TreeNode) => {
+const getMainBranchProb = (node: TreeSegment) => {
 
   if (node.length > 10) return 0
 
@@ -53,7 +51,7 @@ const getMainBranchProb = (node: TreeNode) => {
 
   return 0.9
 }
-const getSideBranchProb = (node: TreeNode) => {
+const getSideBranchProb = (node: TreeSegment) => {
 
   if (node.length > 12) return 0
 
@@ -62,14 +60,14 @@ const getSideBranchProb = (node: TreeNode) => {
   return 0.1
 }
 
-const getMainBranchLength = (node: TreeNode) => {
+const getMainBranchLength = (node: TreeSegment) => {
   return 20
 }
-const getSideBranchLength = (node: TreeNode) => {
+const getSideBranchLength = (node: TreeSegment) => {
   return 50
 }
 
-const getMainBranchAngle = (node: TreeNode) => {
+const getMainBranchAngle = (node: TreeSegment) => {
 
   const up = -90
 
@@ -77,7 +75,7 @@ const getMainBranchAngle = (node: TreeNode) => {
 
   return getRandomInt(up - variance, up + variance)
 }
-const getSideBranchAngle = (node: TreeNode) => {
+const getSideBranchAngle = (node: TreeSegment) => {
 
   const up = -90
 
@@ -90,10 +88,10 @@ interface Pos {
   x: number
   y: number
 }
-interface TreeNode {
-  parent: TreeNode | null
-  mainChild: TreeNode | null
-  children: TreeNode[]
+interface TreeSegment {
+  parent: TreeSegment | null
+  mainChild: TreeSegment | null
+  children: TreeSegment[]
 
   isMainChild: boolean
 
@@ -115,7 +113,7 @@ const getNextPos = (pos: Pos, length: number, angle: number): Pos => {
 
 function drawDebugCircle(ctx: CanvasRenderingContext2D, pos: { x: number, y: number }, color = "tomato") {
 
-  const DEBUG_CIRCLE_RADIUS = 8
+  const DEBUG_CIRCLE_RADIUS = 2
 
   ctx.beginPath();
   ctx.arc(pos.x, pos.y, DEBUG_CIRCLE_RADIUS, 0, 2 * Math.PI, false);
@@ -141,10 +139,10 @@ export default function Page() {
 
   const getRandomFloat = () => generator(1000) / 1000
 
-  const [nodes, setNodes] = useState<TreeNode[]>([])
+  const [nodes, setNodes] = useState<TreeSegment[]>([])
   const [segments, setSegments] = useState<TreeSegment[]>([])
 
-  const getNextNodes = (node: TreeNode) => {
+  const getNextNodes = (node: TreeSegment) => {
 
     if (getRandomFloat() < getMainBranchProb(node)) {
       // generate main branch
@@ -161,10 +159,25 @@ export default function Page() {
     } else {
       // if no main branch is generated aka end of branch
 
+      const nodes = recursivelyGetAllMainNodes(node)
+
+      const nodesAreSame = (node1: TreeSegment, node2: TreeSegment) => node1.pos.x === node2.pos.x && node1.pos.y === node2.pos.y
+
       const newSegment = {
-        nodes: recursivelyGetAllMainNodes(node),
+        nodes,
       }
-      setSegments(prev => [...prev, newSegment])
+      setSegments(prev => {
+
+        const parentSegment = prev.filter(i => nodesAreSame(newSegment.nodes.slice(-1)[0], i.nodes[0]))[0]
+
+        // const distanceToStem = recursivelyGetAllMainNodes(segment).length
+
+        newSegment.parent = parentSegment
+
+        newSegment.chaikinsCurve = getChaikinsCurve(newSegment.nodes.map(i => i.pos), 5)
+
+        return [...prev, newSegment]
+      })
     }
     // else {
     //   if (node.length > 15) return
@@ -211,19 +224,19 @@ export default function Page() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
+  const ctx = canvasRef.current!.getContext("2d")!
+
+  const canvasWidth = canvasRef.current!.width
+  const canvasHeight = canvasRef.current!.height
+
   async function generateTree() {
-
-    const ctx = canvasRef.current!.getContext("2d")!
-
-    const canvasWidth = canvasRef.current!.width
-    const canvasHeight = canvasRef.current!.height
 
     const startPos = {
       x: canvasWidth / 2,
-      y: canvasHeight,
+      y: canvasHeight - 10,
     }
 
-    const startNode: TreeNode = {
+    const startNode: TreeSegment = {
       parent: null,
       mainChild: null,
       children: [],
@@ -243,26 +256,22 @@ export default function Page() {
 
   useEffect(() => {
 
-    const ctx = canvasRef.current!.getContext("2d")!
-
-    const canvasWidth = canvasRef.current!.width
-    const canvasHeight = canvasRef.current!.height
-
     ctx.clearRect(0, 0, canvasWidth, canvasHeight)
 
-    const drawNodeDebug = (node: TreeNode | null) => {
+    const drawNodeDebug = (node: TreeSegment | null) => {
 
       if (node == null) return
 
       drawDebugCircle(ctx, node.pos)
 
       for (const child of [node.mainChild, ...node.children]) {
-        if (child != null) console.log(child)
         drawNodeDebug(child)
       }
     }
 
-    const pixelSize = 3
+    const pixelSize = 1
+
+    if (segments.length < 1) return
 
     for (let x = 0; x < canvasWidth; x += pixelSize) {
       for (let y = 0; y < canvasHeight; y += pixelSize) {
@@ -273,7 +282,19 @@ export default function Page() {
             return segments.map(segment => getDistanceToBezierCurve(pos, segment.nodes.map(i => i.pos), 1)).sort((a, b) => a - b)[0]
           }
           if (curveGenAlgo.id === CurveGenerationAlgorithm.CHAIKINS_ALGORITHM.id) {
-            return segments.map(segment => getDistanceToChaikinsCurve(pos, segment.nodes.map(i => i.pos), 1)).sort((a, b) => a - b)[0]
+
+            const closestSegment = segments.map(segment => {
+
+              const [minDistance, progressAlongBranch] = getDistanceToChaikinsCurve(pos, segment.chaikinsCurve)
+
+              segment.distance = minDistance
+              segment.progressAlongBranch = progressAlongBranch
+
+              return segment
+            }
+            ).sort((a, b) => a.distance - b.distance)[0]
+
+            return closestSegment
           }
           if (curveGenAlgo.id === CurveGenerationAlgorithm.CATMULL_ROM_SPLINE.id) {
             return segments.map(segment => getDistanceToCatmullRomSpline(pos, segment.nodes.map(i => i.pos), 1)).sort((a, b) => a - b)[0]
@@ -281,21 +302,29 @@ export default function Page() {
           throw new Error("invalid curve generation algorithm")
         })()
 
-        if (closestBranchDistance < 5) {
-          // draw pixel
+        if (closestBranchDistance == null) continue
+
+        const maxSegmentThickness = 15 - closestBranchDistance.nodes.slice(-1)[0].length
+
+        // const thickness = closestBranchDistance.progressAlongBranch * maxSegmentThickness
+
+        const thickness = 5
+
+        if (closestBranchDistance.distance < thickness) {
           // ctx.fillStyle = `rgba(0, 0, 0, ${(closestBranchDistance / 5)})`
 
+          // ctx.fillStyle = `hsl(${Math.floor(closestBranchDistance.progressAlongBranch  * 360)} 100% 50%)`
           ctx.fillStyle = "green"
 
           ctx.fillRect(x, y, pixelSize, pixelSize)
         }
       }
     }
-    // drawNodeDebug(nodes[0])
+    drawNodeDebug(nodes[0])
   }, [segments, curveGenAlgo, nodes])
 
   return <div>
-    <canvas ref={canvasRef} width="512" height="512" className="bg-red-100" />
+    <canvas ref={canvasRef} width="512" height="512" className="bg-gray-800" />
 
     <select defaultValue={curveGenAlgo.id} onChange={e => {
 
@@ -327,10 +356,10 @@ export default function Page() {
 // TODO: color pixel based on light direction
 // TODO: make branches end in pointy bits
 
-const recursivelyGetAllMainNodes = (node: TreeNode): TreeNode[] => {
-  const mainNodes: TreeNode[] = [];
+const recursivelyGetAllMainNodes = (node: TreeSegment): TreeSegment[] => {
+  const mainNodes: TreeSegment[] = [];
 
-  const traverse = (currentNode: TreeNode): void => {
+  const traverse = (currentNode: TreeSegment): void => {
 
     if (!currentNode.isMainChild) {
 
@@ -368,3 +397,32 @@ function getRandomString(length: number): string {
   }
   return result;
 }
+
+const recursivelyGetMainSegments = (segment: TreeSegment): TreeSegment[] => {
+  const mainSegments: TreeSegment[] = [];
+
+  const traverse = (currentSegment: TreeSegment): void => {
+
+    if (!currentSegment.isMainChild) {
+
+      // if (!currentNode.parent) { // bottom of stem
+
+      //   mainNodes.push(currentNode)
+      // }
+      mainSegments.push(currentSegment)
+
+      if (currentSegment.parent) mainSegments.push(currentSegment.parent)
+
+      return
+    }
+    mainSegments.push(currentSegment)
+
+    if (!currentSegment.parent) {
+      throw new Error("mainChild node must have parent")
+    }
+    traverse(currentSegment.parent)
+  };
+  traverse(segment);
+
+  return mainSegments;
+};

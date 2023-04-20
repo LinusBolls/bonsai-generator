@@ -9,7 +9,7 @@ const getDistance = (p1: Pos, p2: Pos) => {
     return Math.sqrt(dx * dx + dy * dy);
 }
 
-const chaikin = (points: Pos[], iterations: number) => {
+export const getChaikinsCurve = (points: Pos[], iterations: number) => {
     for (let i = 0; i < iterations; i++) {
         const newPoints: Pos[] = [];
         for (let j = 0; j < points.length - 1; j++) {
@@ -32,18 +32,24 @@ const chaikin = (points: Pos[], iterations: number) => {
     return points;
 }
 
-export const getDistanceToChaikinsCurve = (point: Pos, curvePoints: Pos[], iterations: number) => {
-    const curve = chaikin(curvePoints, iterations);
+export const getDistanceToChaikinsCurve = (point: Pos, curve: Pos[]) => {
+
     let minDistance = Number.MAX_VALUE;
+    let progressAlongBranch = 0;
+
     for (let i = 0; i < curve.length - 1; i++) {
-        const p1 = curve[i];
-        const p2 = curve[i + 1];
-        const distance = getDistanceToSegment(point, p1, p2);
+
+        const distance = getDistanceToSegment(point, curve[i], curve[i + 1]);
+
         if (distance < minDistance) {
+
             minDistance = distance;
+            // 0 if the closest point is at the very start, 1 if it's the very tip
+
+            progressAlongBranch = i / (curve.length - 2)
         }
     }
-    return minDistance;
+    return [minDistance, progressAlongBranch];
 }
 
 const getDistanceToSegment = (point: Pos, p1: Pos, p2: Pos) => {
